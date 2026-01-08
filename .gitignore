@@ -201,6 +201,14 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# my
+.env
+*.session
+*.session-journal
+venv/
+downloads/
+
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
