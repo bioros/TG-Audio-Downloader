@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>TG Комбайн</title>
+    <style>
+        :root { --green: #00ff41; --bg: #0a0a0a; --gray: #bbb; --dim: #555; }
+        body { background: var(--bg); color: var(--gray); font-family: 'Consolas', monospace; margin: 0; padding: 20px; font-size: 13px; }
+        .top-bar { display: flex; gap: 10px; background: #111; padding: 15px; border: 1px solid #222; align-items: center; position: sticky; top: 0; z-index: 999; }
+        .path-input { flex-grow: 1; background: #000; border: 1px solid #333; color: var(--green); padding: 8px; font-family: inherit; outline: none; }
+        .btn { background: transparent; border: 1px solid var(--green); color: var(--green); padding: 6px 12px; cursor: pointer; text-transform: uppercase; font-size: 11px; }
+        .btn:hover:not(:disabled) { background: rgba(0, 255, 65, 0.1); }
+        .btn:disabled { border-color: #333; color: #444; cursor: default; }
+        .header { display: grid; grid-template-columns: 40px 1fr 100px 120px 250px; padding: 10px; background: #111; color: var(--green); font-weight: bold; border-bottom: 1px solid #333; }
+        .topic-row { display: grid; grid-template-columns: 40px 1fr 100px 120px 250px; padding: 12px 10px; border-bottom: 1px solid #1a1a1a; align-items: center; }
+        .file-list { background: #050505; display: none; border-left: 2px solid #222; margin-left: 10px; }
+        .file-row { display: grid; grid-template-columns: 40px 200px 1fr 100px 200px; padding: 6px 15px; border-bottom: 1px solid #111; align-items: center; }
+        .progress-box { width: 100%; height: 8px; background: #111; border: 1px solid #222; }
+        .progress-bar { height: 100%; width: 0%; background: #004411; transition: width 0.2s; }
+        .done .progress-bar { background: var(--green); }
+        #status { margin-left: auto; color: var(--green); font-weight: bold; }
+        .image-row { color: var(--dim); font-style: italic; }
+    </style>
+</head>
+<body>
+
+<div class="top-bar">
+    <span style="color:var(--green)">ПУТЬ:</span>
+    <input type="text" id="dl-path" class="path-input" placeholder="Выберите папку...">
+    <button class="btn" onclick="pickFolder()">ОБЗОР</button>
+    <button class="btn" onclick="scanSelected()">СКАН ВЫБРАННЫХ</button>
+    <button class="btn" onclick="downloadSelected()">СКАЧАТЬ</button>
+    <div id="status">ГОТОВ</div>
+</div>
+
+<div class="header">
+    <input type="checkbox" onclick="toggleAll(this)">
+    <span>ТОПИК</span><span>ТРЕКОВ</span><span>ДЕЙСТВИЕ</span><span>ЗАГРУЗКА</span>
+</div>
+<div id="root"></div>
+
+<script>
+    let ws, topics = {};
+
+    function init() {
+        ws = new WebSocket(`ws://${location.host}/ws`);
+        ws.onmessage = e => {
+            const d = JSON.parse(e.data);
+            if(d.type === 'init') {
+                document.getElementById('root').innerHTML = d.topics.map(t => {
+                    topics[t.id] = t.title;
+                    return `<div id="g-${t.id}">
+                        <div class="topic-row">
+                            <input type="checkbox" class="t-cb" id="t-cb-${t.id}" value="${t.id}">
+                            <span style="cursor:pointer" onclick="toggleFiles(${t.id})">📁 ${t.title}</span>
+                            <span id="cnt-${t.id}" style="color:var(--green)">---</span>
+                            <button id="btn-s-${t.id}" class="btn" onclick="startScan(${t.id})">СКАН</button>
+                            <div class="progress-box"><div id="pbar-t-${t.id}" class="progress-bar"></div></div>
+                        </div>
+                        <div id="fs-${t.id}" class="file-list"></div>
+                    </div>`;
+                }).join('');
+            }
+            if(d.type === 'entry') {
+                const btn = document.getElementById(`btn-s-${d.topic_id}`);
+                btn.innerText = d.scan_percent + '%';
+                const fRoot = document.getElementById(`fs-${d.topic_id}`);
+                document.getElementById(`cnt-${d.topic_id}`).innerText = d.total_found;
+                
+                if(!document.getElementById(`fr-${d.track.id}`)) {
+                    const isChecked = document.getElementById(`t-cb-${d.topic_id}`).checked ? 'checked' : '';
+                    const cls = d.track.type === 'image' ? 'image-row' : '';
+                    fRoot.insertAdjacentHTML('beforeend', `<div class="file-row ${cls}" id="fr-${d.track.id}">
+                        <input type="checkbox" class="f-cb f-grp-${d.topic_id}" value="${d.track.id}" ${isChecked}>
+                        <span style="color:#777">${d.track.p}</span>
+                        <span>${d.track.t}</span>
+                        <span style="text-align:right; padding-right:10px">${d.track.s}</span>
+                        <div class="progress-box"><div id="fb-${d.track.id}" class="progress-bar" style="background:var(--green); opacity:0.6"></div></div>
+                    </div>`);
+                }
+            }
+            if(d.type === 'scan_done') {
+                const b = document.getElementById(`btn-s-${d.topic_id}`);
+                b.innerText = "ГОТОВО"; b.disabled = true;
+            }
+            if(d.type === 'dl_status') {
+                document.getElementById(`fb-${d.id}`).style.width = d.progress + '%';
+                updateTopicProgress(d.topic_id);
+            }
+            if(d.type === 'dl_done') {
+                document.getElementById(`fr-${d.id}`).classList.add('done');
+                updateTopicProgress(d.topic_id);
+            }
+        };
+    }
+
+    function updateTopicProgress(tid) {
+        const total = document.querySelectorAll(`.f-grp-${tid}`).length;
+        const done = document.querySelectorAll(`#fs-${tid} .done`).length;
+        document.getElementById(`pbar-t-${tid}`).style.width = ((done/total)*100) + '%';
+    }
+
+    async function pickFolder() {
+        const r = await fetch('/api/select_folder');
+        const d = await r.json();
+        if(d.path) document.getElementById('dl-path').value = d.path;
+    }
+
+    function startScan(id) { ws.send(JSON.stringify({type:'scan_topic', topic_id:id})); }
+    function scanSelected() { document.querySelectorAll('.t-cb:checked').forEach(cb => startScan(cb.value)); }
+    function toggleFiles(id) {
+        const el = document.getElementById(`fs-${id}`);
+        el.style.display = el.style.display === 'block' ? 'none' : 'block';
+    }
+    function toggleAll(m) { document.querySelectorAll('.t-cb, .f-cb').forEach(c => c.checked = m.checked); }
+
+    function downloadSelected() {
+        const path = document.getElementById('dl-path').value;
+        if(!path) return alert("Укажите путь для сохранения!");
+        const selected = document.querySelectorAll('.f-cb:checked');
+        if(selected.length === 0) return alert("Ничего не выбрано!");
+        
+        selected.forEach(cb => {
+            const tid = cb.className.match(/f-grp-(\d+)/)[1];
+            ws.send(JSON.stringify({type: 'download', id: cb.value, topic_id: tid, folder: topics[tid], path}));
+        });
+        document.getElementById('status').innerText = "ЗАГРУЗКА...";
+    }
+
+    init();
+</script>
+</body>
+</html>

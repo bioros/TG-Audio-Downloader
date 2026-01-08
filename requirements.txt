@@ -1,0 +1,5 @@
+telethon==1.40.0
+fastapi==0.128.0
+uvicorn==0.40.0
+python-dotenv==1.0.1
+python-multipart==0.0.21
